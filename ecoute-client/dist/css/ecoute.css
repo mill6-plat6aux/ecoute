@@ -1,0 +1,64 @@
+/*
+ * Copyright 2025 Takuro Okada.
+ * Released under the MIT License.
+ */
+
+body {
+    font-family: "Noto Sans JP", serif;
+    background-color: #E8E8E8;
+}
+
+input {
+    padding: 8px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+}
+
+textarea {
+    padding: 8px;
+    border-radius: 4px;
+    border: 1px solid #ccc;
+}
+
+.main {
+    background-color: white;
+    margin: 32px auto;
+    width: 720px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+    box-shadow: 1px 1px 12px #ccc;
+    padding: 32px;
+}
+
+.dialog {
+    position: absolute;
+    background-color: white;
+    width: 320px;
+    border-radius: 8px;
+    border: 1px solid #ccc;
+    box-shadow: 1px 1px 12px #ccc;
+    padding: 32px;
+}
+
+.checkbox {
+    display: inline-block;
+    cursor: pointer;
+    background-image: url('../images/checkbox-empty.svg');
+    background-position: 0px center;
+    background-size: 16px;
+    background-repeat: no-repeat;
+    padding: 0px 0px 0px 24px;
+    margin: 8px;
+}
+
+.selected {
+    background-image: url('../images/checkbox.svg');
+}
+
+.applyButton {
+    border-radius: 4px;
+    background-color: black;
+    color: white;
+    font-weight: 600;
+    padding: 12px;
+}
