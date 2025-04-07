@@ -1,0 +1,11 @@
+services:
+  ecoute-server:
+    image: haskell:latest
+    container_name: ecoute-server
+    volumes:
+      - ./app:/opt/app/app
+      - ./ecoute.cabal:/opt/app/ecoute.cabal
+    working_dir: /opt/app
+    command: /bin/sh -c 'cabal update && cabal run ecoute'
+    ports:
+      - 3000:3000
