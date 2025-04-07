@@ -6,6 +6,7 @@
 body {
     font-family: "Noto Sans JP", serif;
     background-color: #E8E8E8;
+    position: relative;
 }
 
 input {
@@ -51,7 +52,7 @@ textarea {
     margin: 8px;
 }
 
-.selected {
+.checkbox.selected {
     background-image: url('../images/checkbox.svg');
 }
 
@@ -61,4 +62,13 @@ textarea {
     color: white;
     font-weight: 600;
     padding: 12px;
+}
+
+.calendar .timeButton {
+    display: inline-block;
+    cursor: pointer;
+    background-image: url('../images/time.svg');
+    background-position: center;
+    background-size: 16px;
+    background-repeat: no-repeat;
 }

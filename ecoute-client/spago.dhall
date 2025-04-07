@@ -9,6 +9,7 @@
   , "datetime"
   , "effect"
   , "either"
+  , "enums"
   , "exceptions"
   , "foldable-traversable"
   , "foreign-object"
@@ -16,6 +17,7 @@
   , "integers"
   , "maybe"
   , "now"
+  , "numbers"
   , "prelude"
   , "strings"
   , "tuples"
@@ -23,6 +25,7 @@
   , "web-dom"
   , "web-events"
   , "web-html"
+  , "web-uievents"
   ]
 , packages = ./packages.dhall
 , sources = [ "src/**/*.purs" ]

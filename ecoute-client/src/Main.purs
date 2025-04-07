@@ -10,11 +10,12 @@ import Prelude
 import Affjax.RequestBody as RequestBody
 import Affjax.ResponseFormat as ResponseFormat
 import Affjax.Web (get, post, printError)
+import Calendar (createCalender, getCalendarResult)
 import Data.Argonaut.Core (toArray, toObject, toString)
 import Data.Argonaut.Core as JSON
 import Data.Array (filter)
 import Data.DateTime (adjust)
-import Data.Either (Either(..))
+import Data.Either (Either(..), fromRight)
 import Data.Foldable (traverse_)
 import Data.Formatter.DateTime (formatDateTime)
 import Data.HashMap as HashMap
@@ -50,15 +51,14 @@ import Web.HTML.Location (reload)
 import Web.HTML.Window (document, innerHeight, innerWidth, location, scrollY)
 
 contextPath :: String
--- contextPath = "http://localhost:3000"
-contextPath = "https://lab.rhizome.zone/ecoute/server"
+contextPath = "http://localhost:3000"
 
 main :: Effect Unit
 main = do
     win <- window
     doc <- document win
     handler <- eventListener domReadyHandler
-    addEventListener domcontentloaded handler true (Document.toEventTarget $ toDocument doc)
+    addEventListener domcontentloaded handler false (Document.toEventTarget $ toDocument doc)
 
 domReadyHandler :: Types.Event -> Effect Unit
 domReadyHandler _ = do
@@ -128,7 +128,7 @@ loadMainContents = do
         contents = Just "回答する" 
     }
     listener <- eventListener applyHandler
-    addEventListener click listener true (toEventTarget applyButton)
+    addEventListener click listener false (toEventTarget applyButton)
     appendChild (toNode applyButton) (toNode controls)
 
     pure mainContents
@@ -191,7 +191,7 @@ showThanks = do
             listener <- eventListener (\_ -> 
                 window >>= location >>= reload
             )
-            addEventListener click listener true (toEventTarget applyButton)
+            addEventListener click listener false (toEventTarget applyButton)
             appendChild (toNode applyButton) (toNode controls)
 
 getCurrentDateTimeString :: Effect (Maybe String)
@@ -231,6 +231,7 @@ convertViewToModel nodes = traverseWithIndex (\index node ->
             domTokenList <- classList element
             isText <- DOMTokenList.contains domTokenList "text"
             isLongText <- DOMTokenList.contains domTokenList "long-text"
+            isCalendar <- DOMTokenList.contains domTokenList "calendar"
             if isText then do
                 _element <- querySelector (QuerySelector "input") (toParentNode element)
                 case _element of
@@ -251,6 +252,16 @@ convertViewToModel nodes = traverseWithIndex (\index node ->
                                 pure $ JSON.fromObject $ Object.singleton ("q" <> (show index)) (JSON.fromString value)
                             Nothing -> pure $ JSON.fromObject $ Object.empty
                     Nothing -> pure JSON.jsonNull
+            else if isCalendar then do
+                results <- getCalendarResult element
+                pure $ JSON.fromObject $ Object.singleton ("q" <> (show index)) (JSON.fromArray (map (\result ->
+                    case result of
+                        Just calendarResult -> do
+                            let startTimeString = fromRight "" (formatDateTime "YYYY-MM-DDTHH:mm:ss" calendarResult.startTime)
+                            let endimeString = fromRight "" (formatDateTime "YYYY-MM-DDTHH:mm:ss" calendarResult.endTime)
+                            JSON.fromObject $ Object.fromFoldable [(Tuple "startTime" (JSON.fromString startTimeString)), (Tuple "endTime" (JSON.fromString endimeString))]
+                        Nothing -> JSON.jsonNull
+                ) results))
             else do
                 nodeList <- querySelectorAll (QuerySelector ".checkbox") (toParentNode element)
                 _nodeList <- NodeList.toArray nodeList
@@ -280,11 +291,12 @@ type FormParameters = {
     selection :: Maybe (Array String)
 }
 
-data FormType = Text | MultiSelect | LongText
+data FormType = Text | MultiSelect | LongText | Calendar
 
 fromString :: String -> FormType
 fromString "MultiSelect" = MultiSelect
 fromString "LongText" = LongText
+fromString "Calendar" = Calendar
 fromString _ = Text
 
 formParameters :: FormParameters
@@ -344,7 +356,7 @@ loadForm parameters = do
                                     Nothing -> pure unit
                             Nothing -> pure unit
                     )
-                    addEventListener click listener true (toEventTarget input)
+                    addEventListener click listener false (toEventTarget input)
                     appendChild (toNode input) (toNode contents)
                 ) selection
                 Nothing -> pure unit
@@ -358,5 +370,10 @@ loadForm parameters = do
                 attributes = Just (HashMap.fromArray [ Tuple "type" "text" ])
             }
             appendChild (toNode input) (toNode contents)
+        Calendar -> do
+            domTokenList <- classList form
+            DOMTokenList.add domTokenList "calendar"
 
+            calendar <- createCalender
+            appendChild (toNode calendar) (toNode contents)
     pure form
