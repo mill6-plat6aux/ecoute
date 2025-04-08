@@ -11,31 +11,35 @@ import Affjax.RequestBody as RequestBody
 import Affjax.ResponseFormat as ResponseFormat
 import Affjax.Web (get, post, printError)
 import Calendar (createCalender, getCalendarResult)
-import Data.Argonaut.Core (toArray, toObject, toString)
+import Data.Argonaut.Core (toObject)
 import Data.Argonaut.Core as JSON
-import Data.Array (filter)
-import Data.DateTime (adjust)
+import Data.Array (elem, filter, foldM)
+import Data.DateTime (adjust, month, year)
 import Data.Either (Either(..), fromRight)
+import Data.Enum (toEnum)
 import Data.Foldable (traverse_)
 import Data.Formatter.DateTime (formatDateTime)
+import Data.HashMap (lookup)
 import Data.HashMap as HashMap
-import Data.Int (round)
+import Data.Int (fromString, round)
 import Data.Maybe (Maybe(..), maybe)
 import Data.String (Pattern(..), split)
 import Data.Time.Duration (negateDuration)
 import Data.Traversable (traverse)
 import Data.TraversableWithIndex (traverseWithIndex)
-import Data.Tuple (Tuple(..))
+import Data.Tuple (Tuple(..), fst, snd)
 import DomUtils (elementParameters, htmlTag)
 import Effect (Effect)
 import Effect.Aff (runAff_)
 import Effect.Class.Console as Console
 import Effect.Exception as Exception
-import Effect.Now (getTimezoneOffset, nowDateTime)
+import Effect.Now (getTimezoneOffset, nowDate, nowDateTime)
+import Foreign.Object (isEmpty)
 import Foreign.Object as Object
+import JsonUtils (getArrayFromObject, getNumberFromObject, getObjectFromObject, getStringArrayFromObject, getStringFromObject, getStringHashMapFromObject)
 import Web.DOM.DOMTokenList as DOMTokenList
 import Web.DOM.Document as Document
-import Web.DOM.Element (Element, classList, fromEventTarget, fromNode, toEventTarget, toNode, toParentNode)
+import Web.DOM.Element (Element, classList, fromEventTarget, fromNode, setAttribute, toEventTarget, toNode, toParentNode)
 import Web.DOM.Node (Node, appendChild, textContent)
 import Web.DOM.NodeList as NodeList
 import Web.DOM.ParentNode (QuerySelector(..), querySelector, querySelectorAll)
@@ -82,76 +86,107 @@ loadMainContents = do
 
     getContentsSetting (\json -> do
         let setting = maybe Object.empty identity $ toObject json
-        case Object.lookup "title" setting of 
-            Just title -> do
-                element <- htmlTag elementParameters { 
-                    tagName = "h1", 
-                    style = Just "font-size: large; font-weight: 600; margin-bottom: 8px;", 
-                    contents = Just $ maybe "" identity $ toString title
-                }
-                appendChild (toNode element) (toNode contents)
-            Nothing -> Console.error "No title defined in the configuration file."
-        case Object.lookup "notes" setting of 
-            Just notes -> do
-                traverse_ (\entry -> do
-                    element <- htmlTag elementParameters { 
-                        tagName = "p", 
-                        style = Just "font-size: small; color: gray; margin-bottom: 8px;", 
-                        contents = Just entry
-                    }
-                    appendChild (toNode element) (toNode contents)
-                ) (split (Pattern "\n") $ maybe "" identity $ toString notes)
-            Nothing -> pure unit
-        case Object.lookup "questions" setting of 
-            Just questions -> do
-                traverse_ (\entry -> do
-                    let object = maybe Object.empty identity $ toObject entry
-                    element <- loadForm formParameters { 
-                        title = getStringFromObject "question" object,
-                        formType = fromString $ getStringFromObject "formType" object,
-                        selection = Just $ getStringArrayFromObject "selection" object
-                    }
-                    appendChild (toNode element) (toNode contents)
-                ) (maybe [] identity $ toArray questions)
-            Nothing -> pure unit
+
+        header <- htmlTag elementParameters { 
+            tagName = "div", 
+            style = Just "text-align: center;"
+        }
+        appendChild (toNode header) (toNode contents)
+
+        let imageSetting = getObjectFromObject "image" setting
+        if not (isEmpty imageSetting) then do
+            let imagePath = getStringFromObject "path" "" imageSetting
+            let width = getNumberFromObject "width" 0.0 imageSetting
+            let height = getNumberFromObject "height" 0.0 imageSetting
+            htmlTag elementParameters { 
+                tagName = "div", 
+                style = Just ("height: " <> (show height) <> "px; background-image: url(" <> imagePath <> "); background-position: center 0; background-size: " <> (show width) <> "px " <> (show height) <> "px; background-repeat: no-repeat; margin: 0 0 32px 0;")
+            } >>= \element -> appendChild (toNode element) (toNode header)
+        else pure unit
+
+        let title = getStringFromObject "title" "" setting
+        htmlTag elementParameters { 
+            tagName = "h1", 
+            style = Just "font-size: large; font-weight: 600; margin-bottom: 8px;", 
+            contents = Just title
+        } >>= \element -> appendChild (toNode element) (toNode header)
+        
+        let notes = getStringFromObject "notes" "" setting
+        traverse_ (\entry -> do
+            htmlTag elementParameters { 
+                tagName = "p", 
+                style = Just "font-size: small; color: gray; margin-bottom: 8px;", 
+                contents = Just entry
+            } >>= \element -> appendChild (toNode element) (toNode header)
+        ) (split (Pattern "\n") notes)
+        
+        let questions = getArrayFromObject "questions" setting
+        traverse_ (\entry -> do
+            let object = maybe Object.empty identity $ toObject entry
+            loadForm formParameters { 
+                title = getStringFromObject "question" "" object,
+                formType = formTypeFromString $ getStringFromObject "formType" "" object,
+                selection = Just $ getStringArrayFromObject "selection" object,
+                constraints = Just $ getStringArrayFromObject "constraints" object,
+                attributes = Just $ getStringHashMapFromObject "attributes" object
+            } >>= \element -> appendChild (toNode element) (toNode contents)
+        ) questions
+        
+        let answerSetting = getObjectFromObject "answer" setting
+        let buttonLabel = getStringFromObject "button" "" answerSetting
+        let message = getStringFromObject "message" "" answerSetting
+
+        controls <- htmlTag elementParameters { 
+            tagName = "div", 
+            style = Just "text-align: center;"
+        }
+        appendChild (toNode controls) (toNode mainContents)
+
+        applyButton <- htmlTag elementParameters { 
+            tagName = "button", 
+            classes = Just ["applyButton"], 
+            contents = Just buttonLabel
+        }
+        appendChild (toNode applyButton) (toNode controls)
+
+        eventListener (\_ -> do
+            inputNodeList <- window >>= document >>= toDocument >>> Document.toParentNode >>> querySelectorAll (QuerySelector "input, textarea")
+            inputList <- NodeList.toArray inputNodeList
+            valid <- foldM (\result inputNode -> 
+                if result then
+                    case HTMLInputElement.fromNode inputNode of 
+                        Just inputElement -> do
+                            validity <- HTMLInputElement.checkValidity inputElement
+                            if not validity then do
+                                _ <- HTMLInputElement.reportValidity inputElement
+                                pure validity
+                            else pure validity
+                        Nothing -> pure true
+                else pure false
+            ) true inputList
+            if valid then do
+                nodeList <- window >>= document >>= toDocument >>> Document.toParentNode >>> querySelectorAll (QuerySelector "div.question")
+                answers <- NodeList.toArray nodeList >>= convertViewToModel
+                dateTime <- getCurrentDateTimeString
+                let requestBody = JSON.fromObject $ Object.fromFoldable [ 
+                    (Tuple "date" $ JSON.fromString $ maybe "" identity dateTime), 
+                    (Tuple "answers" $ JSON.fromArray answers)
+                ]
+                runAff_ 
+                    (\result -> case result of
+                        Left error -> Console.error $ Exception.message error
+                        Right _result -> case _result of
+                            Left error -> Console.error $ printError error
+                            Right _ -> showThanks message
+                    ) (post ResponseFormat.string (contextPath <> "/answer") $ Just $ RequestBody.json $ requestBody)
+            else pure unit
+        ) >>= \listener -> addEventListener click listener false (toEventTarget applyButton)
     )
-
-    controls <- htmlTag elementParameters { 
-        tagName = "div", 
-        style = Just "text-align: center;"
-    }
-    appendChild (toNode controls) (toNode mainContents)
-
-    applyButton <- htmlTag elementParameters { 
-        tagName = "button", 
-        classes = Just ["applyButton"], 
-        contents = Just "回答する" 
-    }
-    listener <- eventListener applyHandler
-    addEventListener click listener false (toEventTarget applyButton)
-    appendChild (toNode applyButton) (toNode controls)
 
     pure mainContents
 
-applyHandler :: Types.Event -> Effect Unit
-applyHandler _ = do
-    nodeList <- window >>= document >>= toDocument >>> Document.toParentNode >>> querySelectorAll (QuerySelector "div.question")
-    answers <- NodeList.toArray nodeList >>= convertViewToModel
-    dateTime <- getCurrentDateTimeString
-    let requestBody = JSON.fromObject $ Object.fromFoldable [ 
-        (Tuple "date" $ JSON.fromString $ maybe "" identity dateTime), 
-        (Tuple "answers" $ JSON.fromArray answers)
-    ]
-    runAff_ 
-        (\result -> case result of
-            Left error -> Console.error $ Exception.message error
-            Right _result -> case _result of
-                Left error -> Console.error $ printError error
-                Right _ -> showThanks
-        ) (post ResponseFormat.string (contextPath <> "/answer") $ Just $ RequestBody.json $ requestBody)
-
-showThanks :: Effect Unit
-showThanks = do
+showThanks :: String -> Effect Unit
+showThanks message = do
     scrollY <- window >>= scrollY
     windowWidth <- window >>= innerWidth
     windowHeight <- window >>= innerHeight
@@ -173,7 +208,7 @@ showThanks = do
             headline <- htmlTag elementParameters { 
                 tagName = "div", 
                 style = Just "font-weight: 600;",
-                contents = Just "お忙しいところご回答いただきありがとうございました！"
+                contents = Just message
             }
             appendChild (toNode headline) (toNode frame)
 
@@ -212,17 +247,6 @@ getContentsSetting jsonHandler = runAff_ (\result -> case result of
         Left error -> Console.error $ printError error
         Right response -> jsonHandler response.body
 ) (get ResponseFormat.json "contents.json")
-
-getStringFromObject :: String -> Object.Object JSON.Json -> String
-getStringFromObject key object = do
-    let value = maybe JSON.jsonNull identity $ Object.lookup key object
-    maybe "" identity $ toString value
-
-getStringArrayFromObject :: String -> Object.Object JSON.Json -> Array String
-getStringArrayFromObject key object = do
-    let value = maybe JSON.jsonNull identity $ Object.lookup key object
-    let array = maybe [] identity $ toArray value
-    map (\json -> maybe "" identity $ toString json) array
 
 convertViewToModel :: Array Node -> Effect (Array JSON.Json)
 convertViewToModel nodes = traverseWithIndex (\index node ->
@@ -288,22 +312,26 @@ convertCheckboxToModel nodes =
 type FormParameters = {
     title :: String,
     formType :: FormType,
-    selection :: Maybe (Array String)
+    selection :: Maybe (Array String),
+    constraints :: Maybe (Array String),
+    attributes :: Maybe (HashMap.HashMap String String)
 }
 
 data FormType = Text | MultiSelect | LongText | Calendar
 
-fromString :: String -> FormType
-fromString "MultiSelect" = MultiSelect
-fromString "LongText" = LongText
-fromString "Calendar" = Calendar
-fromString _ = Text
+formTypeFromString :: String -> FormType
+formTypeFromString "MultiSelect" = MultiSelect
+formTypeFromString "LongText" = LongText
+formTypeFromString "Calendar" = Calendar
+formTypeFromString _ = Text
 
 formParameters :: FormParameters
 formParameters = { 
     title: "",
     formType: Text,
-    selection: Nothing
+    selection: Nothing,
+    constraints: Nothing,
+    attributes: Nothing
 }
 
 loadForm :: FormParameters -> Effect Element
@@ -334,6 +362,13 @@ loadForm parameters = do
                 attributes = Just (HashMap.fromArray [ Tuple "type" "text" ])
             }
             appendChild (toNode input) (toNode contents)
+
+            case parameters.constraints of
+                Just constraints -> 
+                    if elem "required" constraints then
+                        setAttribute "required" "required" input
+                    else pure unit
+                Nothing -> pure unit
         MultiSelect -> do
             domTokenList <- classList form
             DOMTokenList.add domTokenList "multi-select"
@@ -374,6 +409,30 @@ loadForm parameters = do
             domTokenList <- classList form
             DOMTokenList.add domTokenList "calendar"
 
-            calendar <- createCalender
+            now <- nowDate
+            let result = case parameters.attributes of
+                    Just attributes -> do
+                        let year' = case lookup "year" attributes of
+                                Just yearString -> 
+                                    case fromString yearString of
+                                        Just yearValue -> 
+                                            case toEnum yearValue of
+                                                Just value -> value
+                                                Nothing -> year now
+                                        Nothing -> year now
+                                Nothing -> year now
+                        let month' = case lookup "month" attributes of
+                                Just monthString -> 
+                                    case fromString monthString of
+                                        Just monthValue -> 
+                                            case toEnum monthValue of
+                                                Just value -> value
+                                                Nothing -> month now
+                                        Nothing -> month now
+                                Nothing -> month now
+                        (Tuple year' month')
+                    Nothing -> do
+                        (Tuple (year now) (month now))
+            calendar <- createCalender (fst result) (snd result)
             appendChild (toNode calendar) (toNode contents)
     pure form

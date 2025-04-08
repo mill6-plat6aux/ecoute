@@ -12,7 +12,8 @@ module Calendar
 import Prelude
 
 import Data.Array (head, last, length, (..))
-import Data.Date (Date, Day, Month(..), Weekday(..), Year, adjust, canonicalDate, day, exactDate, month, weekday, year)
+import Data.Date (Date, Day, Month(..), Weekday(..), Year, adjust, canonicalDate, day, month, weekday)
+import Data.DateTime (hour)
 import Data.DateTime as DateTime
 import Data.Either (fromRight)
 import Data.Enum (fromEnum, toEnum)
@@ -30,7 +31,7 @@ import Data.Time.Duration (Days(..))
 import Data.Traversable (traverse)
 import DomUtils (elementParameters, getNumberValueFromStyles, getStyles, htmlTag, setStyles)
 import Effect (Effect)
-import Effect.Now (getTimezoneOffset, nowDate)
+import Effect.Now (getTimezoneOffset)
 import Web.DOM (Element, Node)
 import Web.DOM.ChildNode (remove)
 import Web.DOM.DOMTokenList as DOMTokenList
@@ -49,8 +50,8 @@ import Web.HTML.Window (document)
 import Web.UIEvent.MouseEvent (buttons, fromEvent, pageY)
 import Web.UIEvent.MouseEvent.EventTypes (mousemove)
 
-createCalender :: Effect Element
-createCalender = do
+createCalender :: Year -> Month -> Effect Element
+createCalender year month = do
     container <- htmlTag elementParameters { 
         tagName = "div",
         style = Just "display: inline-block;",
@@ -58,7 +59,7 @@ createCalender = do
     }
     let containerNode = toNode container
 
-    now <- nowDate
+    let date = canonicalDate year month bottom
 
     headerRow <- htmlTag elementParameters { 
         tagName = "div",
@@ -67,18 +68,21 @@ createCalender = do
     let headerRowNode = toNode headerRow
     appendChild headerRowNode containerNode
 
+    let yearString = show (fromEnum year)
+    let monthString = show month
+
     htmlTag elementParameters { 
         tagName = "div",
         style = Just "display: inline-block; margin: 0 4px 0 0; font-weight: 600; user-select: none;",
         classes = Just ["year"],
-        contents = Just (show (fromEnum (year now)))
+        contents = Just yearString
     } >>= toNode >>> \node -> appendChild node headerRowNode
 
     htmlTag elementParameters { 
         tagName = "div",
         style = Just "display: inline-block; margin: 0 0 0 4px; font-weight: 600; user-select: none;",
         classes = Just ["month"],
-        contents = Just (show (month now))
+        contents = Just monthString
     } >>= toNode >>> \node -> appendChild node headerRowNode
 
     weekdayRow <- htmlTag elementParameters { 
@@ -104,26 +108,16 @@ createCalender = do
         } >>= toNode >>> \node -> appendChild node weekdayRowNode
     )
 
-    case (firstDate now) of
-        Just date -> do
-            row <- createRow
-            let rowNode = toNode row
-            appendChild rowNode containerNode
+    row <- createRow
+    let rowNode = toNode row
+    appendChild rowNode containerNode
 
-            let weekdayOffset = case weekday date of
-                    Sunday -> 0
-                    Monday -> 1
-                    Tuesday -> 2
-                    Wednesday -> 3
-                    Thursday -> 4
-                    Friday -> 5
-                    Saturday -> 6
-            createOffsetElement weekdayOffset rowNode
+    let weekdayOffset = mod (fromEnum (weekday date)) 7
+    createOffsetElement weekdayOffset rowNode
 
-            createCalenderElement date rowNode containerNode
-            
-            pure container
-        Nothing -> pure container
+    createCalenderElement date rowNode containerNode
+    
+    pure container
 
 createOffsetElement :: Int -> Node -> Effect Unit
 createOffsetElement offset rowNode
@@ -203,11 +197,6 @@ createRow = htmlTag elementParameters {
     tagName = "div",
     style = Just "display: block; white-space: nowrap; border-bottom: 1px solid black;"
 }
-
-firstDate :: Date -> Maybe Date
-firstDate date = case toEnum 1 of
-    Just day -> exactDate (year date) (month date) day
-    Nothing -> Nothing
 
 addTimeButton :: Element -> (Int -> Int -> Effect Unit) -> Effect Element
 addTimeButton parentElement applyHandler = do
@@ -376,11 +365,27 @@ getCalendarResult element = do
                 case date of
                     Just date' -> do
                         case timeResult of
-                            Just timeResult' ->
-                                    createDateTime date' timeResult'.startTime >>= \startDateTime -> createDateTime date' timeResult'.endTime >>= \endDateTime -> pure (Just {startTime: startDateTime, endTime: endDateTime})
+                            Just timeResult' -> do
+                                if hour timeResult'.endTime /= bottom then do
+                                    startDateTime <- createDateTime date' timeResult'.startTime
+                                    endDateTime <- createDateTime date' timeResult'.endTime
+                                    pure (Just {startTime: startDateTime, endTime: endDateTime})
+                                else
+                                    case adjust (Days 1.0) date' of
+                                        Just nextDate -> do
+                                            startDateTime <- createDateTime date' timeResult'.startTime
+                                            endDateTime <- createDateTime nextDate timeResult'.endTime
+                                            pure (Just {startTime: startDateTime, endTime: endDateTime})
+                                        Nothing -> pure Nothing
                             Nothing -> 
                                 case getTime 0 0 0 0 of
-                                    Just time' -> createDateTime date' time' >>= \startDateTime -> createDateTime date' time' >>= \endDateTime -> pure (Just {startTime: startDateTime, endTime: endDateTime})
+                                    Just initialTime -> do
+                                        case adjust (Days 1.0) date' of
+                                            Just nextDate -> do
+                                                startDateTime <- createDateTime date' initialTime
+                                                endDateTime <- createDateTime nextDate initialTime
+                                                pure (Just {startTime: startDateTime, endTime: endDateTime})
+                                            Nothing ->  pure Nothing
                                     Nothing ->  pure Nothing
                     Nothing -> pure Nothing
             Nothing -> pure Nothing
@@ -462,7 +467,7 @@ getTimeResult dayElement = do
 
 getTime :: Int -> Int -> Int -> Int -> Maybe Time
 getTime hour minute second millisecond = 
-    case toEnum hour of
+    case toEnum (if hour == 24 then 0 else hour) of
         Just hourValue -> case toEnum minute of
             Just minuteValue -> case toEnum second of
                 Just secondValue -> case toEnum millisecond of
