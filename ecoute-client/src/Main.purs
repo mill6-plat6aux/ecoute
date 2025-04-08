@@ -14,7 +14,7 @@ import Calendar (createCalender, getCalendarResult)
 import Data.Argonaut.Core (toObject)
 import Data.Argonaut.Core as JSON
 import Data.Array (elem, filter, foldM)
-import Data.DateTime (adjust, month, year)
+import Data.DateTime (month, year)
 import Data.Either (Either(..), fromRight)
 import Data.Enum (toEnum)
 import Data.Foldable (traverse_)
@@ -24,7 +24,6 @@ import Data.HashMap as HashMap
 import Data.Int (fromString, round)
 import Data.Maybe (Maybe(..), maybe)
 import Data.String (Pattern(..), split)
-import Data.Time.Duration (negateDuration)
 import Data.Traversable (traverse)
 import Data.TraversableWithIndex (traverseWithIndex)
 import Data.Tuple (Tuple(..), fst, snd)
@@ -33,7 +32,7 @@ import Effect (Effect)
 import Effect.Aff (runAff_)
 import Effect.Class.Console as Console
 import Effect.Exception as Exception
-import Effect.Now (getTimezoneOffset, nowDate, nowDateTime)
+import Effect.Now (nowDate, nowDateTime)
 import Foreign.Object (isEmpty)
 import Foreign.Object as Object
 import JsonUtils (getArrayFromObject, getNumberFromObject, getObjectFromObject, getStringArrayFromObject, getStringFromObject, getStringHashMapFromObject)
@@ -232,13 +231,9 @@ showThanks message = do
 getCurrentDateTimeString :: Effect (Maybe String)
 getCurrentDateTimeString = do
     dateTime <- nowDateTime
-    minutes <- getTimezoneOffset
-    case adjust (negateDuration minutes) dateTime of
-        Nothing -> pure Nothing
-        Just adjustedDateTime -> 
-            case formatDateTime "YYYY-MM-DDTHH:mm:ss" adjustedDateTime of
-                Left _ -> pure Nothing
-                Right string -> pure $ Just string
+    case formatDateTime "YYYY-MM-DDTHH:mm:ss" dateTime of
+        Left _ -> pure Nothing
+        Right string -> pure $ Just string
 
 getContentsSetting :: (JSON.Json -> Effect Unit) -> Effect Unit
 getContentsSetting jsonHandler = runAff_ (\result -> case result of

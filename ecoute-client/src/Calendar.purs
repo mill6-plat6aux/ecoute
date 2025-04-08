@@ -19,16 +19,17 @@ import Data.Either (fromRight)
 import Data.Enum (fromEnum, toEnum)
 import Data.Foldable (for_)
 import Data.Formatter.Number (formatNumber)
-import Data.HashMap (insert)
+import Data.HashMap (fromArray, insert)
 import Data.Int (fromString)
 import Data.Int as Int
 import Data.Maybe (Maybe(..), maybe)
 import Data.Number (abs)
 import Data.Number as Number
-import Data.String (Pattern(..), split, stripSuffix)
+import Data.String (Pattern(..), indexOf, split, stripSuffix, take)
 import Data.Time (Time(..))
 import Data.Time.Duration (Days(..))
 import Data.Traversable (traverse)
+import Data.Tuple (Tuple(..))
 import DomUtils (elementParameters, getNumberValueFromStyles, getStyles, htmlTag, setStyles)
 import Effect (Effect)
 import Effect.Now (getTimezoneOffset)
@@ -37,7 +38,7 @@ import Web.DOM.ChildNode (remove)
 import Web.DOM.DOMTokenList as DOMTokenList
 import Web.DOM.Document as Document
 import Web.DOM.Element (classList, fromNode, getAttribute, setAttribute, toChildNode, toEventTarget, toNode, toParentNode)
-import Web.DOM.Node (appendChild, textContent)
+import Web.DOM.Node (appendChild)
 import Web.DOM.NodeList (toArray)
 import Web.DOM.ParentNode (QuerySelector(..), querySelector, querySelectorAll)
 import Web.Event.Event (preventDefault, stopPropagation)
@@ -46,12 +47,18 @@ import Web.HTML (window)
 import Web.HTML.Event.EventTypes (click)
 import Web.HTML.HTMLDocument (toDocument)
 import Web.HTML.HTMLElement (fromElement, offsetHeight, offsetLeft, offsetTop, offsetWidth)
-import Web.HTML.Window (document)
+import Web.HTML.Navigator (language)
+import Web.HTML.Window (document, navigator)
 import Web.UIEvent.MouseEvent (buttons, fromEvent, pageY)
 import Web.UIEvent.MouseEvent.EventTypes (mousemove)
 
 createCalender :: Year -> Month -> Effect Element
 createCalender year month = do
+    languageCode_ <- window >>= navigator >>= language
+    let languageCode = case indexOf (Pattern "-") languageCode_ of
+            Just index -> take index languageCode_
+            Nothing -> languageCode_
+
     container <- htmlTag elementParameters { 
         tagName = "div",
         style = Just "display: inline-block;",
@@ -63,7 +70,7 @@ createCalender year month = do
 
     headerRow <- htmlTag elementParameters { 
         tagName = "div",
-        style = Just "display: block; text-align: center;"
+        style = Just "display: block; text-align: center; padding: 4px;"
     }
     let headerRowNode = toNode headerRow
     appendChild headerRowNode containerNode
@@ -71,18 +78,27 @@ createCalender year month = do
     let yearString = show (fromEnum year)
     let monthString = show month
 
+    let localYearString = 
+            if languageCode == "ja" then yearString <> "年"
+            else yearString
+    let localMonthString = 
+            if languageCode == "ja" then show (fromEnum month) <> "月"
+            else monthString
+
     htmlTag elementParameters { 
         tagName = "div",
         style = Just "display: inline-block; margin: 0 4px 0 0; font-weight: 600; user-select: none;",
         classes = Just ["year"],
-        contents = Just yearString
+        attributes = Just (fromArray [(Tuple "data-value" yearString)]),
+        contents = Just localYearString
     } >>= toNode >>> \node -> appendChild node headerRowNode
 
     htmlTag elementParameters { 
         tagName = "div",
         style = Just "display: inline-block; margin: 0 0 0 4px; font-weight: 600; user-select: none;",
         classes = Just ["month"],
-        contents = Just monthString
+        attributes = Just (fromArray [(Tuple "data-value" monthString)]),
+        contents = Just localMonthString
     } >>= toNode >>> \node -> appendChild node headerRowNode
 
     weekdayRow <- htmlTag elementParameters { 
@@ -93,7 +109,16 @@ createCalender year month = do
     appendChild weekdayRowNode containerNode
 
     for_ (0..6) (\i -> do
-        let label = case i of
+        let label = if languageCode == "ja" then 
+            case i of
+                0 -> "日"
+                1 -> "月"
+                2 -> "火"
+                3 -> "水"
+                4 -> "木"
+                5 -> "金"
+                _ -> "土"
+        else case i of
                 0 -> "Sun"
                 1 -> "Mon"
                 2 -> "Tue"
@@ -151,11 +176,14 @@ createCalenderElement date rowNode containerNode = do
     }
     appendChild (toNode rangeElement) (toNode element)
 
+    let dayString = show (fromEnum (day date))
+
     dayLabel <- htmlTag elementParameters { 
         tagName = "div",
         style = Just ("display: inline-block; width: 100%; height: 100%; padding: 4px; position: absolute; left: 0; top: 0;"),
         classes = Just ["label"],
-        contents = Just $ show $ fromEnum $ day date
+        attributes = Just (fromArray [(Tuple "data-value" dayString)]),
+        contents = Just dayString
     }
     appendChild (toNode dayLabel) (toNode element)
 
@@ -412,9 +440,11 @@ getYear calendarElement = do
     element <- querySelector (QuerySelector ".year") (toParentNode calendarElement)
     case element of
         Just label -> do
-            dateValue <- textContent (toNode label)
-            case fromString dateValue of
-                Just value -> pure (toEnum value)
+            dateValue <- getAttribute "data-value" label
+            case dateValue of
+                Just yearValue -> case fromString yearValue of
+                    Just value -> pure (toEnum value)
+                    Nothing -> pure Nothing
                 Nothing -> pure Nothing
         Nothing -> pure Nothing
 
@@ -423,8 +453,10 @@ getMonth calendarElement = do
     element <- querySelector (QuerySelector ".month") (toParentNode calendarElement)
     case element of
         Just label -> do
-            value <- textContent (toNode label)
-            pure (monthFromString value)
+            dateValue <- getAttribute "data-value" label
+            case dateValue of
+                Just monthValue -> pure (monthFromString monthValue)
+                Nothing -> pure Nothing
         Nothing -> pure Nothing
 
 getDay :: Element -> Effect (Maybe Day)
@@ -432,9 +464,11 @@ getDay dayElement = do
     element <- querySelector (QuerySelector ".label") (toParentNode dayElement)
     case element of
         Just label -> do
-            dateValue <- textContent (toNode label)
-            case fromString dateValue of
-                Just value -> pure (toEnum value)
+            dateValue <- getAttribute "data-value" label
+            case dateValue of
+                Just dayValue -> case fromString dayValue of
+                    Just value -> pure (toEnum value)
+                    Nothing -> pure Nothing
                 Nothing -> pure Nothing
         Nothing -> pure Nothing
 
